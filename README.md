@@ -3,7 +3,7 @@
 
 Customized CLI/TUI/GUI installer for [Kan-Linux](https://github.com/kan-linux).
 
-Source code for the CLI component is available within this project according to LGTPL-3.0.
+Source code for the CLI component is available within this project according to LGPL-3.0.
 
 ## Quick Start
 
