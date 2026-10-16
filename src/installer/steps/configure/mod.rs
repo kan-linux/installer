@@ -1,10 +1,8 @@
-use crate::bootloader::Bootloader;
 mod chroot_conf;
 use self::chroot_conf::ChrootConfigurator;
 use super::{mount_cdrom, mount_efivars};
 use crate::installer::{conf::RecoveryEnv, steps::normalize_os_release_name};
 use crate::chroot::Chroot;
-use crate::distribution;
 use crate::errors::*;
 use crate::external::remount_rw;
 use crate::hardware_support;
@@ -24,8 +22,6 @@ use tempdir::TempDir;
 use crate::timezones::Region;
 use crate::Config;
 use crate::UserAccountCreate;
-use crate::INSTALL_HARDWARE_SUPPORT;
-use crate::RUN_UBUNTU_DRIVERS;
 
 /// Self-explanatory -- the fstab file will be generated with this header.
 const FSTAB_HEADER: &[u8] = b"# /etc/fstab: static file system information.
@@ -81,10 +77,8 @@ pub fn configure<D: InstallerDiskOps, P: AsRef<Path>, S: AsRef<str>, F: FnMut(i3
     let configure_dir = TempDir::new_in(&tpath, "distinst")
         .with_context(|err| format!("creating tempdir at {:?}: {}", tpath, err))?;
 
-    let install_pkgs = &mut cascade! {
-        Vec::with_capacity(32);
-        ..extend_from_slice(distribution::debian::get_bootloader_packages(&iso_os_release)?);
-    };
+    // kanlinux has no package manager: required tools already live in the squashfs.
+    let _ = &remove_pkgs;
 
     callback(5);
 
@@ -125,10 +119,6 @@ pub fn configure<D: InstallerDiskOps, P: AsRef<Path>, S: AsRef<str>, F: FnMut(i3
             s.spawn(|_| b = lvm_autodetection());
             s.spawn(|_| c = generate_fstabs());
             s.spawn(|_| {
-                if config.flags & INSTALL_HARDWARE_SUPPORT != 0 {
-                    hardware_support::append_packages(install_pkgs, &iso_os_release);
-                }
-
                 configure_graphics = hardware_support::switchable_graphics::configure_graphics(&mount_dir);
             });
         });
@@ -187,58 +177,8 @@ pub fn configure<D: InstallerDiskOps, P: AsRef<Path>, S: AsRef<str>, F: FnMut(i3
 
         callback(30);
 
-        let (retain, lang_output) = rayon::join(
-            // Get packages required by this disk configuration.
-            || distribution::debian::get_required_packages(disks, iso_os_release),
-            // Attempt to run the check-language-support external command.
-            || distribution::debian::check_language_support(&config.lang, &chroot),
-        );
-
-        let lang_output = lang_output?;
-
-        // Variable for storing a value that may be allocated.
-        let lang_output_;
-
-        // Collect a list of language packages to retain. If the command was not
-        // found, an empty array will be returned.
-        let lang_packs = match lang_output.as_ref() {
-            Some(output) => {
-                // Packages in the output are delimited with spaces.
-                // This is collected as a Cow<'_, str>.
-                let packages = output.split_whitespace().collect::<Vec<_>>();
-
-                match distribution::debian::get_dependencies_from_list(&packages) {
-                    Some(dependencies) => {
-                        lang_output_ = dependencies;
-                        &lang_output_[..]
-                    }
-                    None => &[],
-                }
-            }
-            None => &[],
-        };
-
-        // Add the retained packages to the list of packages to be installed.
-        // There are some packages that Ubuntu will still remove even if they've been removed from
-        // the removal list.
-        install_pkgs.extend_from_slice(&retain);
-
-        // Filter the discovered language packs and installed packages from the remove list.
-        let mut remove = remove_pkgs
-            .iter()
-            .map(AsRef::as_ref)
-            .filter(|pkg| !lang_packs.iter().any(|x| pkg == x) && !install_pkgs.contains(&pkg))
-            .collect::<Vec<&str>>();
-
-        // Remove incompatible bootloader packages
-        match Bootloader::detect() {
-            Bootloader::Bios => {
-                if iso_os_release.name == "Pop!_OS" {
-                    remove.push("kernelstub");
-                }
-            }
-            Bootloader::Efi => (),
-        }
+        // kanlinux ships a preconfigured rootfs in the squashfs: no apt/dpkg package
+        // install or removal. Language packs and hardware packages are out of scope.
 
         callback(35);
 
@@ -272,11 +212,9 @@ pub fn configure<D: InstallerDiskOps, P: AsRef<Path>, S: AsRef<str>, F: FnMut(i3
             Ok(())
         };
 
-        let apt_install = chroot
-            .cdrom_add()
-            .and_then(|_| chroot.apt_install(&install_pkgs))
-            .and_then(|_| chroot.install_drivers(config.flags & RUN_UBUNTU_DRIVERS != 0))
-            .and_then(|_| chroot.cdrom_disable());
+        // kanlinux-specific post-install: hostname/hosts are rewritten here too,
+        // plus identity (machine-id, ssh keys), setuid/sudoers, and greetd user.
+        let post_install = chroot.run_post_install(config, user, region);
 
         map_errors! {
             hostname => "error writing hostname";
@@ -284,15 +222,14 @@ pub fn configure<D: InstallerDiskOps, P: AsRef<Path>, S: AsRef<str>, F: FnMut(i3
             machine_id => "error writing unique machine id";
             netresolv => "error linking netresolve";
             locale => "error generating locales";
-            apt_install => "error installing packages";
             kernel_copy => "error copying kernel from casper to chroot";
             timezone => "error setting timezone";
-            useradd => "error creating user account"
+            useradd => "error creating user account";
+            post_install => "error running kanlinux post-install"
         }
 
         callback(70);
 
-        let apt_remove = chroot.apt_remove(&remove);
         let recovery = chroot.recovery(
             config,
             &normalize_os_release_name(&iso_os_release.name),
@@ -301,7 +238,6 @@ pub fn configure<D: InstallerDiskOps, P: AsRef<Path>, S: AsRef<str>, F: FnMut(i3
         );
 
         map_errors! {
-            apt_remove => "error removing packages";
             recovery => "error creating recovery partition"
         }
 

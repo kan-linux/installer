@@ -23,9 +23,4 @@ libc = "0.2.68"
 pbr = "1.0.2"
 partition-identity = "0.2.8"
 proc-mounts = "0.2.4"
-failure_derive = "0.1.7"
-
-[dependencies.failure]
-version = "0.1.7"
-default-features = false
-features = ["derive"]
+thiserror = "1.0"

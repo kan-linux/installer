@@ -16,14 +16,30 @@ pub use self::{
 };
 pub use disk_types::{PartitionTable, Sector};
 
+use crate::external::pvs;
 use std::{
     collections::BTreeMap,
     io,
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 use sysfs_class::{Block, SysClass};
 
-static mut PVS: Option<BTreeMap<PathBuf, Option<String>>> = None;
+static PVS: OnceLock<BTreeMap<PathBuf, Option<String>>> = OnceLock::new();
+
+/// Lazily-cached `pvs` output, used to detect LVM physical volumes.
+///
+/// kanlinux 的第一阶段安装不依赖 LVM；`pvs` 不存在时按「无物理卷」处理，
+/// 不让缺失的 lvm2 阻断分区流程。
+pub(crate) fn pvs_cache() -> &'static BTreeMap<PathBuf, Option<String>> {
+    PVS.get_or_init(|| match pvs() {
+        Ok(map) => map,
+        Err(why) => {
+            warn!("pvs unavailable ({}); assuming no LVM physical volumes", why);
+            BTreeMap::new()
+        }
+    })
+}
 
 /// Obtains the size of the device, in bytes, from a given block device.
 /// Note: This is only to be used with getting partition sizes of logical volumes.

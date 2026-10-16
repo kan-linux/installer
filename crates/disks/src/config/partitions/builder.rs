@@ -83,21 +83,26 @@ impl PartitionBuilder {
 
     /// Builds a brand new Partition from the current state of the builder.
     pub fn build(self) -> PartitionInfo {
+        let filesystem = if self.volume_group.is_some() {
+            if self.volume_group.as_ref().unwrap().1.is_some() {
+                Some(FileSystem::Luks)
+            } else {
+                Some(FileSystem::Lvm)
+            }
+        } else {
+            self.filesystem
+        };
+
+        // BIOS boot 等无文件系统分区：不要打 FORMAT 标记
+        let bitflags = if filesystem.is_some() { FORMAT } else { 0 };
+
         PartitionInfo {
-            bitflags:     FORMAT,
+            bitflags,
             number:       -1,
             start_sector: self.start_sector,
             end_sector:   self.end_sector,
             part_type:    self.part_type,
-            filesystem:   if self.volume_group.is_some() {
-                if self.volume_group.as_ref().unwrap().1.is_some() {
-                    Some(FileSystem::Luks)
-                } else {
-                    Some(FileSystem::Lvm)
-                }
-            } else {
-                self.filesystem
-            },
+            filesystem,
             flags:        self.flags,
             name:         self.name,
             device_path:  PathBuf::new(),

@@ -18,31 +18,31 @@ use std::{
 use sys_mount::{Mount, MountFlags, Unmount, UnmountFlags};
 use tempdir::TempDir;
 
-#[derive(Debug, Fail)]
+#[derive(Debug, thiserror::Error)]
 pub enum ReinstallError {
-    #[fail(display = "no root partition found within the disks configuration")]
+    #[error("no root partition found within the disks configuration")]
     NoRootPartition,
-    #[fail(display = "partition {:?} has an invalid file system ({:?})", part, fs)]
+    #[error("partition {part:?} has an invalid file system ({fs:?})")]
     InvalidFilesystem { fs: FileSystem, part: PathBuf },
-    #[fail(display = "partition could not be mounted: {}", why)]
+    #[error("partition could not be mounted: {why}")]
     PartitionMount { why: io::Error },
-    #[fail(display = "error creating temporary directory: {}", why)]
+    #[error("error creating temporary directory: {why}")]
     TempDir { why: io::Error },
-    #[fail(display = "I/O error: {}", why)]
+    #[error("I/O error: {why}")]
     IO { why: io::Error },
-    #[fail(display = "no file system found on partition")]
+    #[error("no file system found on partition")]
     NoFilesystem,
-    #[fail(display = "unable to {} pre-existing account files: {}", step, why)]
+    #[error("unable to {step} pre-existing account files: {why}")]
     AccountsObtain { why: io::Error, step: &'static str },
-    #[fail(display = "distinst failed to install: {}", why)]
+    #[error("distinst failed to install: {why}")]
     Install { why: io::Error },
-    #[fail(display = "supplied disk configuration will format /home when it should not")]
+    #[error("supplied disk configuration will format /home when it should not")]
     ReformattingHome,
-    #[fail(display = "unable to probe existing devices: {}", why)]
+    #[error("unable to probe existing devices: {why}")]
     DiskProbe { why: crate::disks::DiskError },
-    #[fail(display = "invalid partition configuration: {}", why)]
+    #[error("invalid partition configuration: {why}")]
     InvalidPartitionConfiguration { why: io::Error },
-    #[fail(display = "install media at {:?} was not found", path)]
+    #[error("install media at {path:?} was not found")]
     MissingSquashfs { path: PathBuf },
 }
 

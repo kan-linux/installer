@@ -14,7 +14,11 @@ pub fn partition<F: FnMut(i32)>(disks: &mut Disks, mut callback: F) -> io::Resul
             // This collection of physical volumes and their optional volume groups
             // will be used to obtain a list of volume groups associated with our
             // modified partitions.
-            pvs().with_context(|why| format!("failed to get PVS map: {}", why))
+            // kanlinux 第一阶段无 LVM；`pvs` 缺失时按空表继续，不阻断分区。
+            Ok(pvs().unwrap_or_else(|why| {
+                warn!("pvs unavailable ({}); assuming no LVM volumes", why);
+                BTreeMap::new()
+            }))
         },
         || {
             // Perform layout changes serially, due to libparted thread safety issues,

@@ -19,8 +19,7 @@ distinst-disk-ops = { path = "../disk-ops" }
 distinst-external-commands = { path = "../external" }
 distinst-utils = { path = "../utils" }
 envfile = "0.2.1"
-failure = "0.1.7"
-failure_derive = "0.1.7"
+thiserror = "1.0"
 fstab-generate = { path = "../fstab-generate" }
 itertools = "0.10"
 libc = "0.2.68"

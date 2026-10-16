@@ -402,6 +402,7 @@ fn ntfs_dry_run(path: &Path, size: &str) -> io::Result<()> {
     }
 }
 
+#[allow(dead_code)]
 fn ntfs_consistency_check(path: &Path) -> io::Result<()> {
     let mut consistency_check = Command::new("ntfsresize");
     consistency_check.args(&["-i", "-f"]).arg(path);

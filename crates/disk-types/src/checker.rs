@@ -7,10 +7,10 @@ pub trait Fscker {
     fn fsck(path: &Path, fs: FileSystem) -> Result<(), FsckError>;
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum FsckError {
-    #[error(display = "fsck I/O error: {:?}", _0)]
+    #[error("fsck I/O error: {0:?}")]
     Io(io::Error),
-    #[error(display = "command failed with exit status: {}", _0)]
+    #[error("command failed with exit status: {0}")]
     BadStatus(ExitStatus),
 }

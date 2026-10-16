@@ -56,7 +56,7 @@ fn mount_bind_if_exists(source: &Path, target: &Path) -> io::Result<Option<Unmou
 }
 
 /// Replace spaces in OS names as necessary, and rename elementary OS to ubuntu.
-fn normalize_os_release_name(name: &str) -> Cow<str> {
+fn normalize_os_release_name(name: &str) -> Cow<'_, str> {
     if name.contains(' ') {
         let name = name.replace(' ', "_");
         if &*name == "elementary_OS" {

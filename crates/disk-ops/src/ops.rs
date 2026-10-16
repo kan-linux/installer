@@ -229,12 +229,10 @@ impl<'a> CreatePartitions<'a> {
             if partition.kind != PartitionType::Extended {
                 // Open a second instance of the disk which we need to get the new partition ID.
                 let path = get_partition_id(self.device_path, partition.start_sector as i64)?;
-                self.format_partitions.push((
-                    path,
-                    partition
-                        .file_system
-                        .expect("file system does not exist when creating partition"),
-                ));
+                // BIOS boot 等无文件系统分区：不格式化
+                if let Some(fs) = partition.file_system {
+                    self.format_partitions.push((path, fs));
+                }
             }
         }
 

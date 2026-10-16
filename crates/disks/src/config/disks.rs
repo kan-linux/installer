@@ -5,7 +5,7 @@ use super::{
     },
     detect_fs_on_device, find_partition, find_partition_mut,
     partitions::{FORMAT, REMOVE, SOURCE},
-    Disk, LvmEncryption, PartitionTable, PVS,
+    Disk, LvmEncryption, PartitionTable, pvs_cache,
 };
 use disk_types::{BlockDeviceExt, PartitionExt, PartitionTableExt, SectorExt};
 use crate::external::{
@@ -412,7 +412,11 @@ impl Disks {
 
         let devices_to_modify = self.get_device_paths_to_modify();
         info!("devices to modify: {:?}", devices_to_modify);
-        let volume_map = pvs().map_err(|why| DiskError::ExternalCommand { why })?;
+        // kanlinux 第一阶段无 LVM/LUKS；`pvs`/`dmsetup` 缺失时按空表继续。
+        let volume_map = pvs().unwrap_or_else(|why| {
+            warn!("pvs unavailable ({}); assuming no LVM volumes to deactivate", why);
+            Default::default()
+        });
         info!("volume map: {:?}", volume_map);
         let pvs = physical_volumes_to_deactivate(&devices_to_modify);
         info!("pvs: {:?}", pvs);
@@ -610,11 +614,8 @@ impl Disks {
         let mounts = MOUNTS.read().expect("failed to get mounts in Disk::new");
         let swaps = SWAPS.read().expect("failed to get swaps in Disk::new");
 
-        unsafe {
-            if PVS.is_none() {
-                PVS = Some(pvs().expect("do you have the `lvm2` package installed?"));
-            }
-        }
+        // Prime the LVM physical-volume cache before the parallel walk.
+        let _ = pvs_cache();
 
         disks.physical.par_iter_mut().flat_map(|device| device.get_partitions_mut()).for_each(
             |part| {
@@ -1184,7 +1185,7 @@ impl Disks {
         }
 
         for (luks_parent, id) in associations {
-            let mut logical = &mut self.logical[id];
+            let logical = &mut self.logical[id];
             info!("associating {:?} with {:?}", logical.device_path, luks_parent);
             logical.luks_parent = Some(luks_parent);
         }

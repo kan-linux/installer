@@ -11,14 +11,14 @@ pub trait PartitionResizer {
     fn shrink(path: &Path, fs: FileSystem, current: u64, new: u64) -> Result<(), ResizeError>;
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum ResizeError {
-    #[error(display = "shrinking not supported for {}", fs)]
+    #[error("shrinking not supported for {fs}")]
     ShrinkNotSupported { fs: FileSystem },
-    #[error(display = "growing not supported for {}", fs)]
+    #[error("growing not supported for {fs}")]
     GrowNotSupported { fs: FileSystem },
-    #[error(display = "I/O error occurred while shrinking: {}", _0)]
+    #[error("I/O error occurred while shrinking: {0}")]
     Io(io::Error),
-    #[error(display = "command failed with exit status: {}", _0)]
+    #[error("command failed with exit status: {0}")]
     BadStatus(ExitStatus)
 }

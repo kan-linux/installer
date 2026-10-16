@@ -12,18 +12,6 @@ use std::{
 use crate::timezones::Region;
 use crate::Config;
 
-const APT_OPTIONS: &[&str] = &[
-    "-o",
-    "Acquire::cdrom::AutoDetect=0",
-    "-o",
-    "Acquire::cdrom::mount=/cdrom",
-    "-o",
-    "APT::CDROM::NoMount=1",
-];
-
-// For a clean boot by default, we hide all output and use plymouth
-const BOOT_OPTIONS: &str = "quiet loglevel=0 systemd.show_status=false splash";
-
 // For a reliable boot when using recovery, we show all output and do not use plymouth
 const RECOVERY_BOOT_OPTIONS: &str = "";
 
@@ -36,150 +24,74 @@ impl<'a> ChrootConfigurator<'a> {
         Self { chroot }
     }
 
-    /// Install the given packages if they are not already installed.
-    pub fn apt_install(&self, packages: &[&str]) -> io::Result<()> {
-        info!("installing packages: {:?}", packages);
-        let mut command = self.chroot.command(
-            "apt-get",
-            &cascade! {
-                Vec::with_capacity(APT_OPTIONS.len() + packages.len() + 3);
-                ..extend_from_slice(&["install", "-y"]);
-                ..extend_from_slice(APT_OPTIONS);
-                ..extend_from_slice(&packages);
-            },
-        );
-
-        command.run()
-    }
-
-    /// Remove the given packages from the system, if they are installed.
-    pub fn apt_remove(&self, packages: &[&str]) -> io::Result<()> {
-        info!("removing packages: {:?}", packages);
-        self.chroot
-            .command(
-                "apt-get",
-                &cascade! {
-                    Vec::with_capacity(packages.len() + 2);
-                    ..extend_from_slice(&["purge", "-y"]);
-                    ..extend_from_slice(packages);
-                },
-            )
-            .run()?;
-        self.chroot.command("apt-get", &["autoremove", "-y", "--purge"]).run()
-    }
-
     /// Configure the bootloader on the system.
+    ///
+    /// kanlinux installs the bootloader in `steps::bootloader` (grub-install /
+    /// grub-mkconfig). This hook is kept for API compatibility and does nothing.
     pub fn bootloader(&self) -> io::Result<()> {
-        info!("configuring bootloader");
-
-        // If the NVIDIA DKMS driver is installed, add its flags to the cmdline for the simpledrm patch to pick up.
-        // This test must not use /proc or /sys for detection since the installer can run inside a
-        // chroot where those come from the host environment.
-        let has_nvidia = Path::new("/var/lib/dkms/nvidia").exists();
-        let nvidia_boot_options = if has_nvidia { "nvidia-drm.modeset=1" } else { "" };
-
-        let result = self
-            .chroot
-            .command(
-                "kernelstub",
-                &[
-                    "--esp-path",
-                    "/boot/efi",
-                    "--add-options",
-                    &format!("{BOOT_OPTIONS} {nvidia_boot_options}"),
-                    "--loader",
-                    "--manage-only",
-                    "--force-update",
-                    "--verbose",
-                ],
-            )
-            .run();
-
-        match result {
-            Ok(()) => Ok(()),
-            // If kernelstub was not found, use grub instead.
-            Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
-                let args: &[&str] = &[];
-                self.chroot.command("update-grub", args).run()
-            }
-            Err(why) => Err(why),
-        }
+        info!("bootloader will be installed by the bootloader step");
+        Ok(())
     }
 
-    /// Add the apt repository on the image, so that packages may be installed from it.
-    pub fn cdrom_add(&self) -> io::Result<()> {
-        if Path::new("/cdrom").exists() {
-            let sources_path = "/etc/apt/sources.list.d/cdrom.sources";
-            if Path::new(sources_path).exists() {
-                info!("apt-cdrom already configured in {}", sources_path);
-                Ok(())
-            } else {
-                info!("adding apt-cdrom to /etc/apt/sources.list");
-                self.chroot
-                    .command(
-                        "apt-cdrom",
-                        &cascade! {
-                            Vec::with_capacity(APT_OPTIONS.len() + 1);
-                            ..extend_from_slice(APT_OPTIONS);
-                            ..push("add");
-                        },
-                    )
-                    .run()
+    /// Run the kanlinux post-install script inside the target.
+    ///
+    /// The script is embedded in the installer and written to `/tmp` on the
+    /// target for the duration of the call.
+    pub fn run_post_install(
+        &self,
+        config: &Config,
+        user: Option<&crate::UserAccountCreate>,
+        timezone: Option<&Region>,
+    ) -> io::Result<()> {
+        info!("running kanlinux post-install configuration");
+
+        let script_path = self.chroot.path.join("tmp/kanlinux-configure.sh");
+        fs::write(&script_path, include_str!("../../../../kanlinux-configure.sh"))
+            .with_context(|err| format!("writing kanlinux-configure.sh: {}", err))?;
+
+        // Timezone as "Area/City" from the region table, if provided.
+        let tz = timezone.map(|r| {
+            // Region's path is like /usr/share/zoneinfo/Asia/Shanghai
+            r.path()
+                .to_str()
+                .and_then(|p| p.strip_prefix("/usr/share/zoneinfo/"))
+                .unwrap_or("Asia/Shanghai")
+                .to_owned()
+        });
+
+        let (username, password, fullname) = match user {
+            Some(u) => (
+                u.username.clone(),
+                u.password.clone().unwrap_or_default(),
+                u.realname.clone().unwrap_or_default(),
+            ),
+            None => (String::new(), String::new(), String::new()),
+        };
+
+        // The script requires a username; skip user setup when none was given.
+        let mut command = self.chroot.command("sh", &["/tmp/kanlinux-configure.sh"]);
+        command.env("KAN_HOSTNAME", &config.hostname);
+        command.env("KAN_LOCALE", &config.lang);
+        if let Some(tz) = tz {
+            command.env("KAN_TIMEZONE", &tz);
+        }
+        if !username.is_empty() {
+            command.env("KAN_USERNAME", &username);
+            if !password.is_empty() {
+                command.env("KAN_PASSWORD", &password);
+            }
+            if !fullname.is_empty() {
+                command.env("KAN_FULLNAME", &fullname);
             }
         } else {
-            Ok(())
+            // No user requested: use a placeholder so the script can still
+            // apply hostname/locale/identity changes.
+            command.env("KAN_USERNAME", "kan");
         }
-    }
 
-    pub fn install_drivers(&self, install: bool) -> io::Result<()> {
-        if install {
-            info!("finding drivers for hardware");
-            let args: &[&str] = &["list", "--recommended"];
-            let output = self.chroot.command("ubuntu-drivers", args).run_with_stdout()?;
-            // ubuntu-drivers returns packages separated by newlines and/or space characters.
-            // https://git.launchpad.net/ubuntu/+source/ubuntu-drivers-common/tree/ubuntu-drivers#n479
-            let packages: Vec<&str> = output.lines().flat_map(|line| line.trim().split(" ")).collect();
-
-            info!("installing drivers: {:?}", packages);
-            let mut command = self.chroot.command(
-                "apt-get",
-                &cascade! {
-                    Vec::with_capacity(APT_OPTIONS.len() + packages.len() + 3);
-                    ..extend_from_slice(&["install", "-y"]);
-                    ..extend_from_slice(APT_OPTIONS);
-                    ..extend(packages);
-                },
-            );
-
-            let result = command.run();
-            match result {
-                Ok(()) => Ok(()),
-                // Don't fail the whole install if it wasn't possible to install drivers
-                Err(_) => {
-                    warn!("Unable to install optional drivers");
-                    Ok(())
-                }
-            }
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Disable that repository, now that they system has been installed.
-    pub fn cdrom_disable(&self) -> io::Result<()> {
-        if Path::new("/cdrom").exists() {
-            let sources_path = "/etc/apt/sources.list.d/cdrom.sources";
-            if Path::new(sources_path).exists() {
-                info!("removing apt-cdrom source in {}", sources_path);
-                fs::remove_file(sources_path)
-            } else {
-                info!("disabling apt-cdrom from /etc/apt/sources.list");
-                let path = self.chroot.path.join("etc/apt/sources.list");
-                misc::sed(&path, "s/deb cdrom:/# deb cdrom:/g")
-            }
-        } else {
-            Ok(())
-        }
+        let result = command.run();
+        let _ = fs::remove_file(&script_path);
+        result
     }
 
     /// Create a new user account.
@@ -191,24 +103,33 @@ impl<'a> ChrootConfigurator<'a> {
         fullname: Option<&str>,
         profile_icon: Option<&str>,
     ) -> io::Result<()> {
-        // Add the user to the system.
+        let _ = config;
+        // kanlinux: wheel grants sudo; audio/video/input/kvm/render for device access.
+        // squashfs 里可能已有同名用户（如 kan），存在则只更新组，不再 useradd。
         {
-            const DEFAULT_USERADD_FLAGS: &[&str] = &[
-                "-m",
-                "-G", "adm,sudo,lpadmin",
-                "-s", "/bin/bash"
-            ];
-
-            let mut command = self.chroot.command("useradd", DEFAULT_USERADD_FLAGS);
-
-            if let Some(name) = fullname {
-                command.args(&["-c", name]);
-            }
-
-            command.arg(user).run()?;
+            let mut cmd = self.chroot.command(
+                "sh",
+                &[
+                    "-c",
+                    // $1 = user, $2 = fullname (optional)
+                    r#"if id "$1" >/dev/null 2>&1; then \
+                           usermod -a -G wheel,audio,video,input,kvm,render "$1"; \
+                       else \
+                           if [ -n "$2" ]; then \
+                               useradd -m -G wheel,audio,video,input,kvm,render -s /bin/bash -c "$2" "$1"; \
+                           else \
+                               useradd -m -G wheel,audio,video,input,kvm,render -s /bin/bash "$1"; \
+                           fi; \
+                       fi"#,
+                    "sh",
+                    user,
+                    fullname.unwrap_or(""),
+                ],
+            );
+            cmd.run()?;
         }
 
-        // Set the password for the newly-created user.
+        // Set the password for the user.
         if let Some(pass) = pass {
             let pass = &[pass, "\n", pass, "\n"].concat();
             self.chroot.command("passwd", &[user]).stdin_input(pass).run()?;
@@ -268,10 +189,21 @@ impl<'a> ChrootConfigurator<'a> {
     }
 
     /// Use locale-gen and update-locale to set the locale of the machine.
+    ///
+    /// kanlinux 没有 Debian 的 locale-gen/update-locale；locale 由
+    /// `kanlinux-configure.sh` 写入 `/etc/locale.conf`。这里仅在工具存在时执行。
     pub fn generate_locale(&self, locale: &str) -> io::Result<()> {
         info!("generating locales via `locale-gen` and `update-locale`");
-        self.chroot.command("locale-gen", &["--purge", locale]).run()?;
-        self.chroot.command("update-locale", &["--reset", &["LANG=", locale].concat()]).run()
+        let _ = locale; // chroot 环境已设 LC_ALL
+        self.chroot
+            .command("sh", &["-c",
+                "command -v locale-gen >/dev/null 2>&1 || exit 0; \
+                 locale-gen --purge \"$LC_ALL\"; \
+                 if command -v update-locale >/dev/null 2>&1; then \
+                     update-locale --reset \"LANG=$LC_ALL\"; \
+                 fi"])
+            .run()
+            .with_context(|err| format!("failed to generate locales: {}", err))
     }
 
     /// Generate a new machine ID for /var/lib/dbus/machine-id
@@ -297,52 +229,58 @@ impl<'a> ChrootConfigurator<'a> {
         let mut file = misc::create(&hosts)?;
         writeln!(
             &mut file,
-            "# See `man hosts` for details.\n#
-# By default, systemd-resolved or libnss-myhostname will resolve
-# localhost and the system hostname if they're not specified here.
-127.0.0.1\tlocalhost\n::1\t\tlocalhost"
+            "# See `man hosts` for details.\n\
+             127.0.0.1\tlocalhost\n\
+             127.0.1.1\t{}\n\
+             ::1\t\tlocalhost ip6-localhost ip6-loopback\n\
+             ff02::1\t\tip6-allnodes\n\
+             ff02::2\t\tip6-allrouters",
+            hostname
         )
         .with_context(|err| format!("failed to write hosts to {:?}: {}", hosts, err))
     }
 
+    /// Temporarily disable `update-initramfs` so package/script hooks don't
+    /// regenerate initramfs during setup. kanlinux has no such tool — skip.
     pub fn initramfs_disable(&self) -> io::Result<()> {
         info!("symlinking update-initramfs to true for duration of initial setup");
 
-        self.chroot.command("sh", &["-c", "mv /usr/sbin/update-initramfs /usr/sbin/update-initramfs.bak"])
+        // 不存在则跳过（kanlinux 无 Debian 的 update-initramfs）
+        self.chroot
+            .command("sh", &["-c", "test -e /usr/sbin/update-initramfs || exit 0; \
+                mv /usr/sbin/update-initramfs /usr/sbin/update-initramfs.bak && \
+                ln -s /usr/bin/true /usr/sbin/update-initramfs"])
             .run()
-            .with_context(|err| format!("failed to migrate `update-initramfs`: {}", err))?;
-
-        self.chroot.command("sh", &["-c", "ln -s /usr/bin/true /usr/sbin/update-initramfs"])
-            .run()
-            .with_context(|err| format!("failed to link `true` to `update-initramfs`: {}", err))
+            .with_context(|err| format!("failed to migrate `update-initramfs`: {}", err))
     }
 
     pub fn initramfs_reenable(&self) -> io::Result<()> {
         info!("re-enabling update-initramfs");
-        self.chroot.command("sh", &["-c", "rm /usr/sbin/update-initramfs"])
-            .run()
-            .with_context(|err| format!("failed to remove update-initramfs symlink: {}", err))?;
-
-        self.chroot.command("sh", &["-c", "mv /usr/sbin/update-initramfs.bak /usr/sbin/update-initramfs"])
+        self.chroot
+            .command("sh", &["-c", "test -e /usr/sbin/update-initramfs.bak || exit 0; \
+                rm -f /usr/sbin/update-initramfs; \
+                mv /usr/sbin/update-initramfs.bak /usr/sbin/update-initramfs"])
             .run()
             .with_context(|err| format!("failed to restore backup of update-initramfs: {}", err))
     }
 
     /// Set the keyboard layout so that the layout will function, even within the decryption screen.
+    ///
+    /// kanlinux 不使用 Debian 的 console-setup；写入 `/etc/default/keyboard` 后，
+    /// 仅在工具存在时刷新 console-setup。
     pub fn keyboard_layout(&self, config: &Config) -> io::Result<()> {
         info!("configuring keyboard layout");
-        
+
         // Create a config for COSMIC if cosmic-comp is installed.
         if Path::new("/bin/cosmic-comp").exists() {
             set_cosmic_xkb_config(config, self.chroot.path.join("etc/cosmic/com.system76.CosmicComp/v1/xkb_config"))?;
         }
 
-        // This used to use localectl set-x11-keymap, but that doesn't work on some
-        // versions of Ubuntu/Debian.
-        //
-        // See https://bugs.launchpad.net/ubuntu/+source/cloud-init/+bug/2030788
-        //
-        // So, write the keyboard layout to /etc/default/keyboard in the chroot
+        // Write the keyboard layout to /etc/default/keyboard in the chroot.
+        // kanlinux rootfs 可能没有 etc/default 目录。
+        let keyboard_dir = self.chroot.path.join("etc/default");
+        fs::create_dir_all(&keyboard_dir)
+            .with_context(|err| format!("failed to create {:?}: {}", keyboard_dir, err))?;
 
         let keyboard_file = self.chroot.path.join("etc/default/keyboard");
         let mut file = misc::create(&keyboard_file)?;
@@ -363,20 +301,18 @@ impl<'a> ChrootConfigurator<'a> {
             })?;
         }
 
+        // Debian console-setup 可选：kanlinux 无此工具则跳过
         self.chroot
             .command(
-                "/usr/bin/env",
+                "sh",
                 &[
-                    "-i",
-                    "SYSTEMCTL_SKIP_REDIRECT=_",
-                    "openvt",
-                    "--",
-                    "sh",
-                    "/etc/init.d/console-setup.sh",
-                    "reload",
+                    "-c",
+                    "test -x /etc/init.d/console-setup.sh || exit 0; \
+                     openvt -- /etc/init.d/console-setup.sh reload || true",
                 ],
             )
-            .run()?;
+            .run()
+            .with_context(|err| format!("failed to reload console-setup: {}", err))?;
 
         let cached_file = self.chroot.path.join("etc/console-setup/cached.kmap.gz");
         if cached_file.exists() {
@@ -384,13 +320,14 @@ impl<'a> ChrootConfigurator<'a> {
                 .with_context(|err| format!("failed to remove console-setup cache: {}", err))?;
         }
 
+        // 同样仅在目标已有 console-setup 时做 symlink
         self.chroot
             .command(
-                "ln",
+                "sh",
                 &[
-                    "-s",
-                    "/etc/console-setup/cached_UTF-8_del.kmap.gz",
-                    "/etc/console-setup/cached.kmap.gz",
+                    "-c",
+                    "test -d /etc/console-setup || exit 0; \
+                     ln -sf /etc/console-setup/cached_UTF-8_del.kmap.gz /etc/console-setup/cached.kmap.gz || true",
                 ],
             )
             .run()
@@ -591,12 +528,16 @@ options {2} boot=casper hostname=recovery userfullname=Recovery username=recover
     }
 
     pub fn timezone(&self, region: &Region) -> io::Result<()> {
-        self.chroot.command("rm", &["/etc/timezone"]).run()?;
+        self.chroot.command("rm", &["-f", "/etc/timezone"]).run()?;
 
-        let args: &[&str] = &[];
+        // ln -s 而不是 ln：硬链接会让 /etc/timezone 与 zoneinfo 共用 inode，
+        // 之后 echo > /etc/timezone 会写穿并毁掉 TZif（时区回落 UTC）。
+        let args: &[&str] = &["-s"];
         self.chroot.command("ln", args).arg(region.path()).arg("/etc/timezone").run()
     }
 
+    /// Refresh the target's initramfs after configuration (bootloader drivers, etc.).
+    #[allow(dead_code)]
     pub fn update_initramfs(&self) -> io::Result<()> {
         self.chroot
             .command("update-initramfs", &["-u"])

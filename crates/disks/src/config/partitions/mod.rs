@@ -3,7 +3,7 @@ mod builder;
 pub use self::builder::PartitionBuilder;
 use super::{
     super::{LvmEncryption, PartitionError},
-    PVS,
+    pvs_cache,
 };
 pub use disk_types::{BlockDeviceExt, FileSystem, PartitionExt, PartitionType, SectorExt};
 use crate::external::{get_label, is_encrypted};
@@ -151,7 +151,7 @@ impl PartitionInfo {
     pub fn collect_extended_information(&mut self, mounts: &MountList, swaps: &SwapList) {
         let device_path = &self.device_path;
         let original_vg =
-            unsafe { PVS.as_ref().unwrap().get(device_path).and_then(|vg| vg.as_ref().cloned()) };
+            pvs_cache().get(device_path).and_then(|vg| vg.as_ref().cloned());
 
         if let Some(ref vg) = original_vg.as_ref() {
             info!("partition belongs to volume group '{}'", vg);
@@ -264,7 +264,7 @@ impl PartitionInfo {
 
     /// Obtains bock information for the partition, if possible, for use with
     /// generating entries in "/etc/fstab".
-    pub fn get_block_info(&self) -> Option<BlockInfo> {
+    pub fn get_block_info(&self) -> Option<BlockInfo<'_>> {
         let fs = self.get_file_system()?;
         if fs != FileSystem::Swap && self.target.is_none() {
             return None;

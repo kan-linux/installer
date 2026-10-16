@@ -1,3 +1,5 @@
+use bitflags::bitflags;
+
 bitflags! {
     pub struct FileSystemSupport: u8 {
         const LVM = 1;

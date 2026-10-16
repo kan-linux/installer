@@ -13,5 +13,5 @@ tempdir = "0.3.7"
 os-detect = { path = "../os-detect" }
 sysfs-class = "0.1.2"
 libparted = "0.1.4"
-err-derive = "0.3"
+thiserror = "1.0"
 log = "0.4"

@@ -1,8 +1,6 @@
 extern crate clap;
 extern crate distinst;
-extern crate failure;
 #[macro_use]
-extern crate failure_derive;
 extern crate libc;
 extern crate pbr;
 
@@ -26,11 +24,18 @@ use std::{
 };
 
 fn main() {
+    // 由 build_distinst 在编译时注入；用于确认二进制是否为最新构建
+    const BUILD_DATE: &str = match option_env!("KAN_BUILD_DATE") {
+        Some(s) => s,
+        None => "unknown",
+    };
+    eprintln!("kan-installer build: {}", BUILD_DATE);
+
     let matches = App::new("distinst")
+        .version(BUILD_DATE)
         .arg(
             Arg::with_name("username")
                 .long("username")
-                .requires("profile_icon")
                 .help("specifies a default user account to create")
                 .takes_value(true),
         )
@@ -102,7 +107,16 @@ fn main() {
                 .long("remove")
                 .help("defines the manifest file that contains the packages to remove post-install")
                 .takes_value(true)
-                .required(true),
+                .default_value(""),
+        )
+        .arg(
+            Arg::with_name("erase")
+                .long("erase")
+                .help(
+                    "erase the given disk and install kanlinux (GPT: ESP + root). \
+                     Shortcut for a single-disk whole-disk install",
+                )
+                .takes_value(true),
         )
         .arg(
             Arg::with_name("disk")
@@ -110,8 +124,7 @@ fn main() {
                 .long("block")
                 .help("defines a disk that will be manipulated in the installation process")
                 .takes_value(true)
-                .multiple(true)
-                .required(true),
+                .multiple(true),
         )
         .arg(
             Arg::with_name("table")
@@ -220,11 +233,16 @@ fn main() {
                 .takes_value(true)
                 .multiple(true),
         )
-        .arg(Arg::with_name("run-ubuntu-drivers").long("run-ubuntu-drivers").help(
-            "use ubuntu-drivers to find drivers then install in the chroot, some may have \
-             proprietary licenses",
-        ))
         .get_matches();
+
+    // clap2 的 required_unless 在 disk/erase 互斥时不可靠，这里手动校验：
+    // 必须提供 --erase <disk> 或 --block <disk>... 之一。
+    if matches.value_of("erase").is_none() && matches.values_of("disk").is_none() {
+        eprintln!("error: must specify --erase <disk> or --block <disk>...");
+        eprintln!();
+        eprintln!("{}", matches.usage());
+        exit(1);
+    }
 
     if let Err(err) = distinst::log(|_level, _message| {}) {
         eprintln!("Failed to initialize logging: {}", err);
@@ -418,12 +436,6 @@ fn install_flags(matches: &ArgMatches) -> u8 {
 
     flags += if matches.occurrences_of("hardware-support") != 0 {
         distinst::INSTALL_HARDWARE_SUPPORT
-    } else {
-        0
-    };
-
-    flags += if matches.occurrences_of("run-ubuntu-drivers") != 0 {
-        distinst::RUN_UBUNTU_DRIVERS
     } else {
         0
     };

@@ -4,9 +4,9 @@ use super::{
         PartitionFlag, PartitionInfo, PartitionTable, PartitionType,
     },
     partitions::{FORMAT, REMOVE, SOURCE, SWAPPED},
-    PVS,
+    pvs_cache,
 };
-use crate::external::{is_encrypted, pvs};
+use crate::external::is_encrypted;
 use disk_types::{PartitionExt, PartitionTableExt, SectorExt};
 use libparted::{Device, DeviceType, Disk as PedDisk};
 use operations::{
@@ -30,12 +30,6 @@ pub fn detect_fs_on_device(path: &Path) -> Option<PartitionInfo> {
     if let Ok(mut dev) = Device::get(path) {
         if let Ok(disk) = PedDisk::new(&mut dev) {
             if let Some(part) = disk.parts().next() {
-                unsafe {
-                    if PVS.is_none() {
-                        PVS = Some(pvs().expect("do you have the `lvm2` package installed?"));
-                    }
-                }
-
                 let mounts = MOUNTS.read().expect("failed to get mounts in Disk::new");
                 let swaps = SWAPS.read().expect("failed to get swaps in Disk::new");
 
@@ -43,12 +37,9 @@ pub fn detect_fs_on_device(path: &Path) -> Option<PartitionInfo> {
                     Ok(mut part) => {
                         if let Some(part) = part.as_mut() {
                             let device_path = &part.device_path;
-                            let original_vg = unsafe {
-                                PVS.as_ref()
-                                    .unwrap()
-                                    .get(device_path)
-                                    .and_then(|vg| vg.as_ref().cloned())
-                            };
+                            let original_vg = pvs_cache()
+                                .get(device_path)
+                                .and_then(|vg| vg.as_ref().cloned());
 
                             if let Some(ref vg) = original_vg.as_ref() {
                                 info!("partition belongs to volume group '{}'", vg);
@@ -209,11 +200,8 @@ impl Disk {
                 }
 
                 if extended_partition_info {
-                    unsafe {
-                        if PVS.is_none() {
-                            PVS = Some(pvs().expect("do you have the `lvm2` package installed?"));
-                        }
-                    }
+                    // Prime the LVM physical-volume cache before the parallel walk.
+                    let _ = pvs_cache();
 
                     partitions.par_iter_mut().for_each(|part| {
                         part.collect_extended_information(&mounts, &swaps);

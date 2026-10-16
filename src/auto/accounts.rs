@@ -47,7 +47,7 @@ impl AccountFiles {
         })
     }
 
-    pub fn get(&self, home: &OsStr) -> Option<UserData> {
+    pub fn get(&self, home: &OsStr) -> Option<UserData<'_>> {
         let mut home_path = b"/home/".to_vec();
         home_path.extend_from_slice(home.as_bytes());
         let home: &[u8] = &home_path;

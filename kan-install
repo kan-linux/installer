@@ -1,0 +1,174 @@
+#!/bin/sh
+# kan-install — 基于PoP!_OS distinst的 kanlinux 安装器
+#
+# 适合Kan-Linux LiveISO 环境下安装（安装时间在虚拟机环境下不到1分钟）。
+#
+# 用法:
+#   kan-install /dev/vda             # 虚拟磁盘
+#   kan-install /dev/sda             # 真实磁盘，目前不支持多系统安装
+#   kan-install /dev/sda --hostname foo --username bar
+#   kan-install --help
+#
+# 环境变量（可选覆盖默认）:
+#   KAN_HOSTNAME   默认 kan-linux
+#   KAN_USERNAME   默认 kan
+#   KAN_PASSWORD   默认 kan
+#   KAN_LOCALE     默认 en_US.UTF-8
+#   KAN_TIMEZONE   默认 Asia/Shanghai
+
+set -eu
+
+BUILD_DATE="@BUILD_DATE@"
+
+HOSTNAME="${KAN_HOSTNAME:-kan-linux}"
+USERNAME="${KAN_USERNAME:-kan}"
+PASSWORD="${KAN_PASSWORD:-kan}"
+LOCALE="${KAN_LOCALE:-en_US.UTF-8}"
+TIMEZONE="${KAN_TIMEZONE:-Asia/Shanghai}"
+
+usage() {
+    cat << 'EOF'
+用法: kan-install [目标磁盘] [额外参数...]
+
+注意：当前不支持多系统安装，在真实x86-64机器上使用前务必小心
+
+示例:
+  kan-install /dev/vda （虚拟机中的虚拟磁盘)
+  kan-install /dev/sda --hostname mybox --username me --password secret
+
+EOF
+}
+
+SQUASHFS_MOUNT=""
+
+detect_squashfs() {
+    if [ -n "${KAN_SQUASHFS:-}" ]; then
+        echo "${KAN_SQUASHFS}"
+        return
+    fi
+
+    for p in \
+        /cdrom/casper/filesystem.squashfs \
+        /media/cdrom/casper/filesystem.squashfs \
+        /run/initramfs/live/casper/filesystem.squashfs \
+        /mnt/iso/casper/filesystem.squashfs
+    do
+        [ -f "$p" ] && { echo "$p"; return; }
+    done
+
+    local dev
+    for dev in /dev/sr0 /dev/cdrom /dev/sr1; do
+        [ -b "$dev" ] || continue
+        if [ -z "$SQUASHFS_MOUNT" ]; then
+            SQUASHFS_MOUNT="/mnt/kan-iso"
+            mkdir -p "$SQUASHFS_MOUNT"
+            if ! mount -t iso9660 -o ro "$dev" "$SQUASHFS_MOUNT" 2>/dev/null; then
+                SQUASHFS_MOUNT=""
+                continue
+            fi
+        fi
+        if [ -f "$SQUASHFS_MOUNT/casper/filesystem.squashfs" ]; then
+            echo "$SQUASHFS_MOUNT/casper/filesystem.squashfs"
+            return
+        fi
+    done
+
+    if command -v blkid >/dev/null 2>&1; then
+        dev=$(blkid -t TYPE=iso9660 -o device 2>/dev/null | head -n1 || true)
+        if [ -n "$dev" ] && [ -b "$dev" ]; then
+            [ -n "$SQUASHFS_MOUNT" ] || { SQUASHFS_MOUNT="/mnt/kan-iso"; mkdir -p "$SQUASHFS_MOUNT"; }
+            if mount -t iso9660 -o ro "$dev" "$SQUASHFS_MOUNT" 2>/dev/null; then
+                if [ -f "$SQUASHFS_MOUNT/casper/filesystem.squashfs" ]; then
+                    echo "$SQUASHFS_MOUNT/casper/filesystem.squashfs"
+                    return
+                fi
+            fi
+        fi
+    fi
+
+    echo ""
+}
+
+list_disks() {
+    for d in /sys/block/*/dev; do
+        [ -e "$d" ] || continue
+        name=$(basename "$(dirname "$d")")
+        case "$name" in
+            loop*|ram*|fd*|sr*|zram*) continue ;;
+        esac
+        size=$(cat "/sys/block/$name/size" 2>/dev/null || echo 0)
+        size_gi=$(( size / 2 / 1024 / 1024 ))
+        echo "  /dev/$name  ${size_gi}GiB"
+    done
+}
+
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+    usage
+    exit 0
+fi
+
+TARGET=""
+if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
+    TARGET="$1"
+    shift
+else
+    list_disks
+    echo ""
+    exit 1
+fi
+
+if [ ! -b "$TARGET" ]; then
+    echo "error"
+    exit 1
+fi
+
+SQUASHFS="$(detect_squashfs)"
+if [ -z "$SQUASHFS" ]; then
+    echo "error"
+    exit 1
+fi
+
+INSTALLER=""
+for c in /usr/bin/kan-installer /usr/bin/distinst; do
+    [ -x "$c" ] && { INSTALLER="$c"; break; }
+done
+[ -n "$INSTALLER" ] || { echo "error" >&2; exit 1; }
+
+echo "============================================"
+echo " kanlinux 安装"
+echo "============================================"
+echo " 编译时间: $BUILD_DATE"
+if [ -x "$INSTALLER" ]; then
+    echo " 安装器版本: $($INSTALLER --version 2>/dev/null | head -1)"
+fi
+echo " 目标盘:   $TARGET"
+echo " 主机名:   $HOSTNAME"
+echo " 用户:     $USERNAME"
+echo " Locale:   $LOCALE"
+echo " 时区:     $TIMEZONE"
+echo " 安装器:   $INSTALLER"
+echo "============================================"
+printf "确认继续? [y/N] "
+read -r confirm
+case "$confirm" in
+    [yY]|[yY][eE][sS]) ;;
+    *) echo "已取消"; exit 0 ;;
+esac
+
+# 时区 Asia/Shanghai -> zoneinfo 两级参数 (Area City)
+TZ_AREA="${TIMEZONE%%/*}"
+TZ_CITY="${TIMEZONE#*/}"
+if [ "$TZ_AREA" = "$TIMEZONE" ]; then
+    TZ_AREA="Asia"; TZ_CITY="Shanghai"
+fi
+
+exec "$INSTALLER" \
+    --erase "$TARGET" \
+    --hostname "$HOSTNAME" \
+    --username "$USERNAME" \
+    --password "$PASSWORD" \
+    --lang "$LOCALE" \
+    --tz "$TZ_AREA" "$TZ_CITY" \
+    --squashfs "$SQUASHFS" \
+    --force-efi \
+    "$@"

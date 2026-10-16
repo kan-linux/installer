@@ -32,6 +32,12 @@ pub fn initialize<F: FnMut(i32)>(
 
     let fetch_packages = || {
         let mut remove_pkgs = Vec::new();
+
+        // kanlinux 无 apt，remove 清单可为空；空路径不要当成文件打开。
+        if config.remove.is_empty() {
+            return Ok(remove_pkgs);
+        }
+
         {
             let file = match misc::open(&config.remove) {
                 Ok(file) => file,

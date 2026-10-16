@@ -55,7 +55,7 @@ impl<'a> Chroot<'a> {
         &self,
         cmd: S,
         args: I,
-    ) -> Command {
+    ) -> Command<'_> {
         let mut command = cascade! {
             Command::new("chroot");
             ..arg(&self.path);

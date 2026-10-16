@@ -36,7 +36,7 @@ impl InstallOptions {
         let mut alongside_options = Vec::new();
 
         let recovery_option = detect_recovery();
-        let os_release = OS_RELEASE.as_ref().expect("OS_RELEASE fetch failed");
+        let _os_release = OS_RELEASE.as_ref().expect("OS_RELEASE fetch failed");
 
         {
             let erase_options = &mut erase_options;
@@ -211,31 +211,31 @@ impl InstallOptions {
     }
 }
 
-#[derive(Debug, Fail)]
+#[derive(Debug, thiserror::Error)]
 pub enum InstallOptionError {
-    #[fail(display = "partition ID ({:?}) was not found", id)]
+    #[error("partition ID ({id:?}) was not found")]
     PartitionIDNotFound { id: PartitionID },
-    #[fail(display = "partition ({}) was not found in disks object", uuid)]
+    #[error("partition ({uuid}) was not found in disks object")]
     PartitionNotFound { uuid: String },
-    #[fail(display = "partition {} was not found in {:?}", number, device)]
+    #[error("partition {number} was not found in {device:?}")]
     PartitionNotFoundByID { number: i32, device: PathBuf },
-    #[fail(display = "partition error: {}", why)]
+    #[error("partition error: {why}")]
     PartitionError { why: PartitionError },
-    #[fail(display = "device ({:?}) was not found in disks object", path)]
+    #[error("device ({path:?}) was not found in disks object")]
     DeviceNotFound { path: PathBuf },
-    #[fail(display = "logical device was not found by the volume group ({})", vg)]
+    #[error("logical device was not found by the volume group ({vg})")]
     LogicalDeviceNotFound { vg: String },
-    #[fail(display = "error applying changes to disks: {}", why)]
+    #[error("error applying changes to disks: {why}")]
     DiskError { why: DiskError },
-    #[fail(display = "error generating volume group ID: {}", why)]
+    #[error("error generating volume group ID: {why}")]
     GenerateID { why: io::Error },
-    #[fail(display = "recovery does not have LVM partition")]
+    #[error("recovery does not have LVM partition")]
     RecoveryNoLvm,
-    #[fail(display = "EFI partition is required, but not found on this option")]
+    #[error("EFI partition is required, but not found on this option")]
     RefreshWithoutEFI,
-    #[fail(display = "failed to retrieve list of mounts from /proc/mounts: {}", why)]
+    #[error("failed to retrieve list of mounts from /proc/mounts: {why}")]
     ProcMounts { why: io::Error },
-    #[fail(display = "could not remount /cdrom as rewriteable: {}", _0)]
+    #[error("could not remount /cdrom as rewriteable: {0}")]
     RemountCdrom(io::Error),
 }
 

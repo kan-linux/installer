@@ -1,126 +1,63 @@
-# distinst
 
-Distinst is a Rust-based software library that handles Linux distribution installer installation details. It has been built specifically to be used in the construction of Linux distribution installers, so that installers can spend more time improving their UI, and less time worrying about some of the more complicated implementation details, such as partition management & encryption.
+# installer
 
-## Frontends
+Customized CLI/TUI/GUI installer for [Kan-Linux](https://github.com/kan-linux).
 
-At the moment, elementary's installer is the primary target for distinst. However, distinst also ships with a CLI application (also called distinst) that serves as a fully-functioning test bed for the distinst library. Example scripts exist within the [tests](https://github.com/pop-os/distinst/tree/master/tests) directory to demonstrate how the CLI
-can be used to perform installs using files from the Pop! ISO.
+Source code for the CLI component is available within this project according to LGTPL-3.0.
 
-### CLI
+## Quick Start
 
-- [distinst](https://github.com/pop-os/distinst/) (Rust)
+- CLI
 
-### GTK
-
-- [elementary Installer](https://github.com/elementary/installer) (Vala)
-
-## Capabilities
-
-### Disk Partitioning & Formatting
-
-Distinst provides a Rust, C, and Vala API for probing disk and partition information, as well as the ability to create and manipulate partitions. In addition to partitioning the disk via the libparted bindings, distinst will also handle disk partitioning using `mkfs`, provided that you have installed the corresponding packages for each file system type that you want to support in your installer. LUKS & LVM configurations are also supported, and may be configured after configuring your physical partitions.
-
-Implementors of the library should note that distinst utilizes in-memory partition management logic to determine whether changes that are being specified will be valid or not. Changes specified will be applied by distinst during the `install` method, which is where you will pass your disk configurations into. This configuration will be validated by distinst before any changes are made.
-
-#### Rust Example
-
-See the source code for the [distinst](https://github.com/pop-os/distinst/blob/master/cli/src/main.rs) CLI application.
-
-#### Vala Example
-
-```vala
-if (disk.mklabel (bootloader) != 0) {
-    stderr.printf ("unable to write GPT partition table to /dev/sda");
-    exit (1);
-}
-
-var efi_sector = Sector() {
-    flag = SectorKind.MEGABYTE,
-    value = 512
-};
-
-var start = disk.get_sector (Sector.start());
-var end = disk.get_sector (efi_sector);
-
-int result = disk.add_partition(
-    new PartitionBuilder (start, end, FileSystem.FAT32)
-        .set_partition_type (PartitionType.PRIMARY)
-        .add_flag (PartitionFlag.ESP)
-        .set_mount ("/boot/efi")
-);
-
-if (result != 0) {
-    stderr.printf ("unable to add EFI partition to disk");
-    exit (1);
-}
-
-start = disk.get_sector (efi_sector);
-end = disk.get_sector (Sector.end ());
-
-result = disk.add_partition (
-    new PartitionBuilder (start, end, FileSystem.EXT4)
-        .set_partition_type (PartitionType.PRIMARY)
-        .set_mount ("/")
-);
-
-if (result != 0) {
-    stderr.printf ("unable to add / partition to disk");
-    exit (1);
-}
-
-Disks disks = Disks.with_capacity (1);
-disks.push (disk);
-installer.install (disks, config);
-```
-
-### Extracting, Chrooting, & Configuring
-
-The implementor of the library should provide a squashfs file that contains a base image that the installer will extract during installation, as well as the accompanying `.manifest-remove` file. These can be found on the Pop!_OS ISOs, as an example. Once this image has been extracted, the installer will chroot into the new install and then configure the image using the configuration script located at `src/configure.sh`.
-
-### Bootloader
-
-Based on whether the image is running on a system that is EFI or not, the bootloader will be configured using either systemd-boot or GRUB, thereby allowing the user to be capable of booting into install once the system is rebooted.
-
-## Build Instructions
-
-In order to build `distinst` on Pop!, you will need to follow these instructions:
+Run the following command in Kan-Linux's LiveISO after creating the virtual disk.
 
 ```sh
-# Install dependencies
-sudo apt build-dep distinst
+sudo /sbin/kan-install /dev/vda
 
-# Build in debug mode
-# make all DEBUG=1
-
-# Build in release mode
-make
-
-# Install in release mode
-sudo make install prefix=/usr
-
-# Install in debug mode
-# sudo make install prefix=/usr DEBUG=1
-
-# Uninstall
-sudo make uninstall
 ```
 
-The following files will be generated:
+- TUI (Recommended)
 
-- CLI app: `target/release/distinst`
-- Library: `target/release/libdistinst.so`
-- Header: `target/include/distinst.h`
-- pkg-config: `target/pkg-config/distinst.pc`
+Available since Kan-Linux v0.2.8
 
-These files will be placed in /usr/local when installed, and `pkg-config --cflags distinst` or `pkg-config --libs distinst` can then be used to find them.
+<img width="666" height="561" alt="Screenshot From 2026-10-16 19-57-46" src="https://github.com/user-attachments/assets/46160dac-d68e-49e6-9a98-e774d6cdc560" />
+<img width="666" height="561" alt="Screenshot From 2026-10-16 19-58-06" src="https://github.com/user-attachments/assets/d4a42b9b-529c-461d-997b-df71490cd3ef" />
+<img width="666" height="561" alt="Screenshot From 2026-10-16 19-58-18" src="https://github.com/user-attachments/assets/87b9fc78-0c33-4807-baa2-e69ac2116d41" />
+<img width="666" height="561" alt="Screenshot From 2026-10-16 19-58-29" src="https://github.com/user-attachments/assets/d9163fba-0491-452d-9455-0b434fa7b817" />
+<img width="666" height="561" alt="Screenshot From 2026-10-16 19-58-49" src="https://github.com/user-attachments/assets/9418ce9a-406f-4c91-bf99-b459441b8ceb" />
 
-In order to produce a source package, you must run the following commands:
+<img width="666" height="561" alt="Screenshot From 2026-10-16 19-58-59" src="https://github.com/user-attachments/assets/8f5dbc95-ea0b-4fce-a15c-ae4b5aa87df2" />
+<img width="666" height="561" alt="Screenshot From 2026-10-16 19-59-25" src="https://github.com/user-attachments/assets/7f1b6494-da08-42b9-8846-a76bf8a6a253" />
 
-```sh
-# Install cargo-vendor
-cargo install cargo-vendor
 
-# Download vendored sources
-make vendor
-```
+
+- GUI
+
+N/A
+
+## What this stack adds
+- Customized for [Kan-Linux](https://github.com/kan-linux)
+
+## Contributing
+- Contributors can open PRs
+- Collaborators will be invited based on contributions
+- Maintainers can push branches and merge PRs into `master`
+- Any help with managing issues, PRs and projects is very appreciated!
+- Read the [CONTRIBUTING.md](https://github.com/kan-linux/kan/blob/master/CONTRIBUTING.md) for more information
+
+## Language Policy and AI Policy
+
+- To facilitate clear and effective communication, all discussions, comments, documentation, and PRs in this project should be conducted in English, this ensures that all contributors can participate and collaborate effectively.
+- English and Chinese are both fine for issues and discussions.
+- Discussions, issues and PRs should include **human-written content**. **AI-assisted polish is accepted and welcomed**(many of us are non-native English speakers). What matters is not who typed the content but whether a human understands it.
+- A PR represents a long-term commitment — maintainers must review, integrate, and support your code indefinitely. What matters is not who wrote the code but whether a human understands it: either fully, or at the 80–90% level, and is able to explain every change to reviewers, even with AI assistance.
+- Fully AI-generated content and fully automated PRs are not permitted. We value human connection and communication over fully AI-driven interaction.
+
+## Acknowledgements
+
+- [Pop!_OS's distinst](https://github.com/pop-os/distinst)
+- The AI assistant, for technical discussion, design notes, and writing polish during this project
+
+## License
+
+LGPL-3.0  — see [LICENSE](LICENSE).

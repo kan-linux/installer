@@ -92,7 +92,7 @@ pub fn hasher<T: Hash>(key: &T) -> u64 {
     hasher.finish()
 }
 
-pub fn canonicalize(path: &Path) -> Cow<Path> {
+pub fn canonicalize(path: &Path) -> Cow<'_, Path> {
     if let Ok(mut new) = path.canonicalize() {
         while let Ok(tmp) = new.canonicalize() {
             if new == tmp {
@@ -115,7 +115,8 @@ pub fn concat_osstr(input: &[&OsStr]) -> OsString {
 }
 
 pub fn device_maps<F: FnMut(&Path)>(mut action: F) {
-    read_dirs("/dev/mapper", |pv| action(&pv.path())).unwrap()
+    // /dev/mapper 可能不存在（无 device-mapper/LVM 时），不要 panic
+    let _ = read_dirs("/dev/mapper", |pv| action(&pv.path()));
 }
 
 pub fn read_dirs<P: AsRef<Path>, F: FnMut(DirEntry)>(path: P, mut action: F) -> io::Result<()> {

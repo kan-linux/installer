@@ -12,17 +12,17 @@ pub struct NewPartition {
     pub kind: PartitionType,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum PartitionError {
-    #[error(display = "failed to open disk: {}", _0)]
+    #[error("failed to open disk: {0}")]
     OpenDisk(io::Error),
-    #[error(display = "failed to remove partition: {}", _0)]
+    #[error("failed to remove partition: {0}")]
     RemovePartition(io::Error),
-    #[error(display = "failed to commit to disk: {}", _0)]
+    #[error("failed to commit to disk: {0}")]
     CommitToDisk(io::Error),
-    #[error(display = "failed to create partition: {}", _0)]
+    #[error("failed to create partition: {0}")]
     CreatePartition(io::Error),
-    #[error(display = "failed to retrieve new partition info: {}", _0)]
+    #[error("failed to retrieve new partition info: {0}")]
     GetNewData(io::Error)
 
 }

@@ -8,9 +8,12 @@ const JSON_PATH: &str = "/usr/share/iso-codes/json/iso_3166-1.json";
 #[derive(Debug, Deserialize)]
 pub struct Country {
     alpha_2: String,
+    #[allow(dead_code)]
     alpha_3: String,
     name: String,
+    #[allow(dead_code)]
     numeric: String,
+    #[allow(dead_code)]
     official_name: Option<String>,
     common_name: Option<String>,
 }

@@ -1,6 +1,7 @@
 //! A crate for installing Linux distributions from a live squashfs.
 //!
-//! > Currently, only Pop!\_OS and Ubuntu are supported by this installer.
+//! Forked from pop-os/distinst for kanlinux: apt/dpkg package hooks have been
+//! removed; the rootfs is deployed as a whole from the squashfs image.
 
 #![allow(unknown_lints)]
 
@@ -20,21 +21,14 @@ pub extern crate proc_mounts;
 pub extern crate sys_mount;
 
 extern crate anyhow;
-extern crate apt_cli_wrappers;
-#[macro_use]
-extern crate bitflags;
 #[macro_use]
 extern crate cascade;
-extern crate err_derive;
 #[macro_use]
 extern crate derive_more;
 extern crate dirs;
 pub extern crate distinst_timezones as timezones;
 extern crate distinst_utils as misc;
 extern crate envfile;
-extern crate failure;
-#[macro_use]
-extern crate failure_derive;
 extern crate fern;
 #[macro_use]
 extern crate fomat_macros;

@@ -9,6 +9,7 @@ use crate::command::Command;
 /// Defines the location where a `chroot` will be performed, with `systemd-nspawn`.
 pub struct SystemdNspawn<'a> {
     pub path:   PathBuf,
+    #[allow(dead_code)]
     clear_envs: bool,
     envs:       Vec<(&'a str, &'a str)>,
 }
@@ -27,7 +28,7 @@ impl<'a> SystemdNspawn<'a> {
         &self,
         cmd: S,
         args: I,
-    ) -> Command {
+    ) -> Command<'_> {
         let mut command = cascade! {
             Command::new("systemd-nspawn");
             ..args(&[
